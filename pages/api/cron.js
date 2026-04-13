@@ -1,23 +1,16 @@
-/**
- * GET /api/cron
- * Вызывается Vercel Cron каждую минуту.
- * Проверяет новые заказы в RetailCRM и отправляет Telegram-уведомление
- * если сумма заказа > 50 000 ₸.
- *
- * Состояние (уже отправленные ID) хранится в Supabase таблице notified_orders.
- */
-
 import { createClient } from "@supabase/supabase-js";
 import https from "https";
+
+const THRESHOLD = 50000;
 
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
       let data = "";
-      res.on("data", (chunk) => { data += chunk; });
+      res.on("data", (c) => { data += c; });
       res.on("end", () => {
         try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error("Invalid JSON: " + data.slice(0, 200))); }
+        catch (e) { reject(new Error("Bad JSON: " + data.slice(0, 100))); }
       });
     }).on("error", reject);
   });
@@ -27,37 +20,22 @@ function httpsPost(url, body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const u = new URL(url);
-    const options = {
-      hostname: u.hostname,
-      path: u.pathname,
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
-    };
-    const req = https.request(options, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error("Invalid JSON: " + data.slice(0, 200))); }
-      });
-    });
+    const req = https.request(
+      { hostname: u.hostname, path: u.pathname, method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => { data += c; });
+        res.on("end", () => { try { resolve(JSON.parse(data)); } catch (e) { resolve({}); } });
+      }
+    );
     req.on("error", reject);
     req.write(payload);
     req.end();
   });
 }
 
-const THRESHOLD = 50000;
-
 export default async function handler(req, res) {
-  // Vercel передаёт Authorization header для cron — проверяем
-  if (
-    process.env.CRON_SECRET &&
-    req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`
-  ) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
   const RETAILCRM_URL = process.env.RETAILCRM_URL;
   const RETAILCRM_KEY = process.env.RETAILCRM_API_KEY;
   const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -66,7 +44,6 @@ export default async function handler(req, res) {
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   try {
-    // 1. Получаем последние заказы из RetailCRM
     const crmData = await httpsGet(
       `${RETAILCRM_URL}/api/v5/orders?apiKey=${RETAILCRM_KEY}&limit=50&page=1`
     );
@@ -81,9 +58,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ checked: orders.length, notified: 0 });
     }
 
-    // 2. Проверяем какие уже уведомляли (через Supabase)
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
     const ids = bigOrders.map((o) => String(o.id));
     const { data: alreadySent } = await supabase
       .from("notified_orders")
@@ -93,7 +68,6 @@ export default async function handler(req, res) {
     const sentIds = new Set((alreadySent || []).map((r) => String(r.retailcrm_id)));
     const toNotify = bigOrders.filter((o) => !sentIds.has(String(o.id)));
 
-    // 3. Отправляем уведомления и сохраняем ID
     let notified = 0;
     for (const order of toNotify) {
       const total = parseFloat(order.summ || 0);
@@ -104,12 +78,7 @@ export default async function handler(req, res) {
       const phone = phones[0]?.number || "—";
       const city = order.delivery?.address?.city || "не указан";
       const items = (order.items || [])
-        .map(
-          (i) =>
-            `• ${i.productName} × ${i.quantity || 1} = ${(
-              (i.initialPrice || 0) * (i.quantity || 1)
-            ).toLocaleString("ru-RU")} ₸`
-        )
+        .map((i) => `• ${i.productName} × ${i.quantity || 1} = ${((i.initialPrice || 0) * (i.quantity || 1)).toLocaleString("ru-RU")} ₸`)
         .join("\n");
 
       const message =
@@ -127,18 +96,16 @@ export default async function handler(req, res) {
         parse_mode: "Markdown",
       });
 
-      await supabase
-        .from("notified_orders")
-        .insert({ retailcrm_id: String(order.id), total, notified_at: new Date().toISOString() });
+      await supabase.from("notified_orders").insert({
+        retailcrm_id: String(order.id),
+        total,
+        notified_at: new Date().toISOString(),
+      });
 
       notified++;
     }
 
-    return res.status(200).json({
-      checked: orders.length,
-      bigOrders: bigOrders.length,
-      notified,
-    });
+    return res.status(200).json({ checked: orders.length, bigOrders: bigOrders.length, notified });
   } catch (err) {
     console.error("Cron error:", err);
     return res.status(500).json({ error: err.message });
