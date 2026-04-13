@@ -8,6 +8,44 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import https from "https";
+
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error("Invalid JSON: " + data.slice(0, 200))); }
+      });
+    }).on("error", reject);
+  });
+}
+
+function httpsPost(url, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const u = new URL(url);
+    const options = {
+      hostname: u.hostname,
+      path: u.pathname,
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error("Invalid JSON: " + data.slice(0, 200))); }
+      });
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
 
 const THRESHOLD = 50000;
 
@@ -29,11 +67,9 @@ export default async function handler(req, res) {
 
   try {
     // 1. Получаем последние заказы из RetailCRM
-    const crmRes = await fetch(
-      `${RETAILCRM_URL}/api/v5/orders?apiKey=${RETAILCRM_KEY}&limit=50&page=1`,
-      { headers: { Accept: "application/json" } }
+    const crmData = await httpsGet(
+      `${RETAILCRM_URL}/api/v5/orders?apiKey=${RETAILCRM_KEY}&limit=50&page=1`
     );
-    const crmData = await crmRes.json();
     if (!crmData.success) {
       return res.status(502).json({ error: crmData.errorMsg });
     }
@@ -85,14 +121,10 @@ export default async function handler(req, res) {
         `🆔 Заказ #${order.id}` +
         (items ? `\n\n📦 Товары:\n${items}` : "");
 
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: CHAT_ID,
-          text: message,
-          parse_mode: "Markdown",
-        }),
+      await httpsPost(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        chat_id: CHAT_ID,
+        text: message,
+        parse_mode: "Markdown",
       });
 
       await supabase
