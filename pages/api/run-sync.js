@@ -113,13 +113,17 @@ export default async function handler(req, res) {
           body:    JSON.stringify({ chat_id: CHAT_ID, text: message, parse_mode: "Markdown" }),
         });
 
-        await supabase.from("notified_orders").insert({
+        const { error: insertError } = await supabase.from("notified_orders").insert({
           retailcrm_id: String(order.id),
           total,
           notified_at:  new Date().toISOString(),
         });
 
-        notified++;
+        if (insertError) {
+          console.error("notified_orders insert error:", insertError.message);
+        } else {
+          notified++;
+        }
       }
     }
 
