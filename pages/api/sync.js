@@ -10,6 +10,18 @@
 import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
+  // DEBUG: GET запрос показывает env vars (убрать после диагностики)
+  if (req.method === "GET") {
+    const key = process.env.RETAILCRM_API_KEY || "";
+    return res.status(200).json({
+      RETAILCRM_URL: process.env.RETAILCRM_URL || "NOT SET",
+      RETAILCRM_API_KEY_length: key.length,
+      RETAILCRM_API_KEY_preview: key.slice(0, 4) + "..." + key.slice(-4),
+      SUPABASE_URL: (process.env.SUPABASE_URL || "NOT SET").slice(0, 40),
+      TELEGRAM_set: !!process.env.TELEGRAM_BOT_TOKEN,
+    });
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
