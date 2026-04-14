@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const RETAILCRM_URL = process.env.RETAILCRM_URL;
+  const RETAILCRM_URL = (process.env.RETAILCRM_URL || "").replace(/\/$/, "");
   const RETAILCRM_KEY = process.env.RETAILCRM_API_KEY;
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
