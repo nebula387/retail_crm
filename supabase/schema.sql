@@ -30,3 +30,16 @@ CREATE POLICY "Allow public read" ON orders
 
 CREATE POLICY "Allow service role all" ON orders
   USING (auth.role() = 'service_role');
+
+-- Таблица для трекинга уже отправленных Telegram-уведомлений (используется cron.js)
+CREATE TABLE IF NOT EXISTS notified_orders (
+  id            BIGSERIAL PRIMARY KEY,
+  retailcrm_id  TEXT UNIQUE NOT NULL,
+  total         NUMERIC(12, 2),
+  notified_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE notified_orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow service role all" ON notified_orders
+  USING (auth.role() = 'service_role');
