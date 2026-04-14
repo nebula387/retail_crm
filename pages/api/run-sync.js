@@ -72,10 +72,15 @@ export default async function handler(req, res) {
 
     if (bigOrders.length > 0 && BOT_TOKEN && CHAT_ID) {
       const ids = bigOrders.map((o) => String(o.id));
-      const { data: alreadySent } = await supabase
+      const { data: alreadySent, error: selectError } = await supabase
         .from("notified_orders")
         .select("retailcrm_id")
         .in("retailcrm_id", ids);
+
+      if (selectError) {
+        console.error("notified_orders select error:", selectError.message);
+        return res.status(500).json({ error: "notified_orders select failed: " + selectError.message });
+      }
 
       const sentIds  = new Set((alreadySent || []).map((r) => String(r.retailcrm_id)));
       const toNotify = bigOrders.filter((o) => !sentIds.has(String(o.id)));
